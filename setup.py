@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     entry_points={
         'console_scripts': [
-            'taomap=taomap-cli.client:start_client',
+            'taomap=taomap_cli.client:main',
         ],
     },
     install_requires=[

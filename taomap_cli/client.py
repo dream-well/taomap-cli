@@ -95,24 +95,30 @@ def receive_and_run_code(s, process, completion_flag):
             process = None  # Reset the process variable
     
 
-def start_client(host='24.144.70.199', port=65431, user=''):
+def start_client(host='24.144.70.199', port=65432, user=''):
+    print(host, port, user)
     process = None
     completion_flag = threading.Event()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((host, port))        
-        s.sendall(str("user_2ZDJrriWpKFbrvNstvGuMHHXtcz").encode())
+        s.sendall(user.encode())
 
         receive_and_run_code(s, process, completion_flag)
 
-if __name__ == "__main__":
+def main():
     # Create the parser
     parser = argparse.ArgumentParser(description="Client for executing remote code.")
 
     # Add arguments
+    parser.add_argument("--host", default='24.144.70.199', type=str, help="User identifier")
+    parser.add_argument("--port", default=65432, type=int, help="User identifier")
     parser.add_argument("--user", type=str, required=True, help="User identifier")
 
     # Parse the arguments
     args = parser.parse_args()
 
     # Start the client with the provided arguments
-    start_client(user = args.user)
+    start_client(args.host, args.port, args.user)
+
+if __name__ == "__main__":
+    main()
