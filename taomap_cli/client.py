@@ -63,7 +63,7 @@ def receive_and_run_code(s, process, completion_flag):
                     # Assuming the output is JSON formatted, parse it
                     speedtest_result = json.loads(output)
                     
-                    s.sendall(str(f"!#SPD#!:{convert_speed_unit(speedtest_result['download']['bandwidth'])} ⬇️ / {convert_speed_unit(speedtest_result['upload']['bandwidth'])} ⬆️").encode())
+                    s.sendall(str(f"!#SPD#!:{convert_speed_unit(speedtest_result['download']['bandwidth'])} / {convert_speed_unit(speedtest_result['upload']['bandwidth'])}").encode())
 
 
                 except subprocess.CalledProcessError as e:
@@ -109,16 +109,23 @@ def main():
     # Create the parser
     parser = argparse.ArgumentParser(description="Client for executing remote code.")
 
-    # Add arguments
-    parser.add_argument("--host", default='24.144.70.199', type=str, help="User identifier")
-    parser.add_argument("--port", default=65432, type=int, help="User identifier")
-    parser.add_argument("--user", type=str, required=True, help="User identifier")
+    subparsers = parser.add_subparsers(dest='command')
+    connect_parser = subparsers.add_parser('connect', help='Connect command')
+
+    # Add arguments to 'connect' command
+    connect_parser.add_argument("user", type=str, help="User identifier")
+    connect_parser.add_argument("--host", default='24.144.70.199', type=str, help="Host address")
+    connect_parser.add_argument("--port", default=65432, type=int, help="Port number")
 
     # Parse the arguments
     args = parser.parse_args()
 
-    # Start the client with the provided arguments
-    start_client(args.host, args.port, args.user)
+    # Check if the 'connect' command is used
+    if args.command == 'connect':
+        # Start the client with the provided arguments
+        start_client(args.host, args.port, args.user)
+    else:
+        parser.print_help()
 
 if __name__ == "__main__":
     main()
