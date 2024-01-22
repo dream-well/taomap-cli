@@ -1,116 +1,77 @@
-import socket
-import multiprocessing
-import threading
-import sys
-import select
-import json
-import subprocess
 import argparse
+import subprocess
+import os
+import signal
 
-def convert_speed_unit(size, decimal_places=2):
-    for unit in ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps']:
-        if size < 1000.0:
-            break
-        size /= 1000.0
-    return f"{size:.{decimal_places}f} {unit}"
+# Constants
+DAEMON_SCRIPT = 'taomap_cli/client_daemon.py'  # Path to your daemon script
+LOG_FILE = 'daemon.log'
+PID_FILE = 'daemon.pid'
 
-class SocketIO:
-    def __init__(self, socket):
-        self.socket = socket
+def write_pid_file(pid):
+    with open(PID_FILE, 'w') as f:
+        f.write(str(pid))
 
-    def write(self, text):
-        # Send each line of output to the server immediately
-        self.socket.sendall(text.encode())
-
-    def flush(self):
-        # This method might be called by print function, so it's necessary to have it.
-        pass
-
-def execute_code(code, s, completion_flag):
-    # Use our custom SocketIO for stdout
-    old_stdout = sys.stdout
-    sys.stdout = SocketIO(s)
-
-    # Execute the received code and capture any exceptions
+def read_pid_file():
     try:
-        exec(code)
-    except Exception as e:
-        print(f"Error executing received code: {e}")
-    finally:
-        completion_flag.set()  # Set the flag to indicate completion
+        with open(PID_FILE, 'r') as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        return None
 
-    # Restore original stdout
-    sys.stdout = old_stdout
+def remove_pid_file():
+    if os.path.exists(PID_FILE):
+        os.remove(PID_FILE)
 
-def receive_and_run_code(s, process, completion_flag):
-    while True:
-        # Non-blocking check for new data from server
-        ready = select.select([s], [], [], 0.1)  # 0.1 seconds timeout
-        if ready[0]:
-            data = s.recv(1024).decode()
-            if not data:
-                continue
-
-            print(data)
-            if data[:8] == "!#SPD#!:" or data[:8] == "!#SPA#!:":
-                try:
-                    # Running the command and capturing the output
-                    result = subprocess.run(['speedtest', '-f', 'json'], capture_output=True, text=True, check=True)
-
-                    # The stdout attribute contains the output of the command
-                    output = result.stdout
-
-                    # Assuming the output is JSON formatted, parse it
-                    speedtest_result = json.loads(output)
-                    
-                    s.sendall(str(f"!#SPD#!:{convert_speed_unit(speedtest_result['download']['bandwidth'])} / {convert_speed_unit(speedtest_result['upload']['bandwidth'])}").encode())
-
-
-                except subprocess.CalledProcessError as e:
-                    # This will catch errors like command not found, or if the command returns a non-zero exit status
-                    print(f"An error occurred: {e}")                    
-                continue
-
+def start_daemon(host, port, user):
+    if read_pid_file():
+        print("Daemon is already running.")
+        return
     
-            elif data[:8] == "!#STO#!:":
-                if process and process.is_alive():
-                    process.terminate()
-                    process.join()
-                    process = None  # Reset the process variable
-                continue
+    command = ['python', DAEMON_SCRIPT, user, '--host', host, '--port', str(port)]
+    with open(LOG_FILE, 'a') as log_file:
+        process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+    write_pid_file(process.pid)
+    print(f"Daemon started with PID {process.pid}")
 
-            if process and process.is_alive():
-                # A previous process is still running, handle according to your needs
-                pass
+def stop_daemon():
+    pid = read_pid_file()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            remove_pid_file()
+            print("Daemon stopped.")
+        except OSError:
+            print("Error stopping daemon.")
+            remove_pid_file()
+    else:
+        print("Daemon is not running.")
 
-            completion_flag.clear()
+def restart_daemon():
+    stop_daemon()
+    start_daemon()
 
-            # Start a new process to execute the received code
-            process = multiprocessing.Process(target=execute_code, args=(data,s, completion_flag))
-            process.start()
+def check_status():
+    pid = read_pid_file()
+    if pid and os.path.exists(f'/proc/{pid}'):
+        print(f"Daemon is running with PID {pid}.")
+    else:
+        print("Daemon is not running.")
 
-        if process and not process.is_alive():
-            # if completion_flag.is_set():
-            s.sendall(str("!#END#!:").encode())  # Send "END" message to the server
-            process = None  # Reset the process variable
-    
-
-def start_client(host='24.144.70.199', port=65432, user=''):
-    print(host, port, user)
-    process = None
-    completion_flag = threading.Event()
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((host, port))        
-        s.sendall(user.encode())
-
-        receive_and_run_code(s, process, completion_flag)
+def show_logs():
+    with open(LOG_FILE, 'r') as log_file:
+        print(log_file.read())
 
 def main():
     # Create the parser
     parser = argparse.ArgumentParser(description="Client for executing remote code.")
 
     subparsers = parser.add_subparsers(dest='command')
-    connect_parser = subparsers.add_parser('connect', help='Connect command')
+    connect_parser = subparsers.add_parser('connect', help='Connect to the server and start the daemon process')
+    subparsers.add_parser('stop', help='Stop the daemon')
+    subparsers.add_parser('restart', help='Restart the daemon')
+    subparsers.add_parser('status', help='Show the status of the daemon')
+    subparsers.add_parser('logs', help='Show the logs of the daemon')
 
     # Add arguments to 'connect' command
     connect_parser.add_argument("user", type=str, help="User identifier")
@@ -122,8 +83,15 @@ def main():
 
     # Check if the 'connect' command is used
     if args.command == 'connect':
-        # Start the client with the provided arguments
-        start_client(args.host, args.port, args.user)
+        start_daemon(args.host, args.port, args.user)
+    elif args.command == 'stop':
+        stop_daemon()
+    elif args.command == 'restart':
+        restart_daemon()
+    elif args.command == 'status':
+        check_status()
+    elif args.command == 'logs':
+        show_logs()
     else:
         parser.print_help()
 

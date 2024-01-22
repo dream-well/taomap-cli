@@ -1,2 +1,4 @@
 taomap.egg-info/
 taomap_cli/__pycache__/
+daemon.log
+daemon.pid
